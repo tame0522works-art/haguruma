@@ -48,6 +48,8 @@ export interface Puzzle {
   input: string
   outputs: Output[]
   obstacles?: Obstacle[]
+  /** その問題で初めて出てくる決まりの説明。 */
+  note?: string
   /** 最少枚数（★3 の基準）。画面で毎回探さずに済むよう問題に持たせ、check:puzzles で solve の結果と照らす。 */
   best: number
 }

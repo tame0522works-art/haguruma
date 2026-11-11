@@ -11,7 +11,9 @@
     "preview": "vite preview",
     "check": "tsx tools/check-engine.ts && tsx tools/check-puzzles.ts",
     "check:engine": "tsx tools/check-engine.ts",
-    "check:puzzles": "tsx tools/check-puzzles.ts"
+    "check:puzzles": "tsx tools/check-puzzles.ts",
+    "trim": "tsx tools/trim.ts",
+    "design": "tsx tools/design.ts"
   },
   "dependencies": {
     "react": "^19.3.0",

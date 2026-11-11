@@ -5,7 +5,7 @@
 // --ratio を省くと比は想定の答えに任せる
 import { solve } from '../src/engine/solve.ts'
 import { evaluate } from '../src/engine/train.ts'
-import { ALL_TEETH, type Layer, type Peg, type Placement, type Puzzle, type Teeth } from '../src/puzzles/types.ts'
+import { ALL_TEETH, type Layer, type Peg, type Obstacle, type Placement, type Puzzle, type Teeth } from '../src/puzzles/types.ts'
 
 const arg = (name: string, def: string) => process.argv.find((a) => a.startsWith(`--${name}=`))?.split('=')[1] ?? def
 const [rn, rd] = arg('ratio', '0/1').split('/').map(Number)
@@ -43,6 +43,7 @@ for (const d of distances) {
 }
 
 const chainLength = Number(arg("chain", "3"))
+const obstacleCount = Number(arg("obstacles", "0"))
 
 /**
  * 解ける問題を作るため、まず入力から歯車を1枚ずつ伸ばした「想定の答え」を作り、その先に出力の軸を置く。
@@ -94,7 +95,50 @@ function attempt(): Puzzle | null {
   }
   const ratio = evaluate(draft(), chain).omega.get("O")!
   if (rn !== 0 && (ratio.n * rd !== rn * ratio.d)) return null
-  return draft({ given: [chain[0], out], outputs: [{ peg: "O", ratio: [ratio.n, ratio.d] }] })
+
+  // 障害物は想定の答えに当たらない所に置く（軸の上にも置かない）
+  const obstacles: Obstacle[] = []
+  for (let k = 0; k < 200 && obstacles.length < obstacleCount; k++) {
+    // 軸の近くに置かないと、どの歯車の邪魔にもならない
+    const near = pick(pegs)
+    const a = random() * 2 * Math.PI
+    const d = 7 + random() * 8
+    const o = { x: Math.round(near.x + d * Math.cos(a)), y: Math.round(near.y + d * Math.sin(a)), r: 2 }
+    if (pegs.some((p) => (p.x - o.x) ** 2 + (p.y - o.y) ** 2 < 36)) continue
+    if (evaluate(draft({ obstacles: [...obstacles, o] }), chain).issues.length) continue
+    obstacles.push(o)
+  }
+  return fit(draft({ given: [chain[0], out], outputs: [{ peg: "O", ratio: [ratio.n, ratio.d] }], ...(obstacles.length ? { obstacles } : {}) }))
+}
+
+/**
+ * 盤を軸の範囲＋いちばん大きい歯車の歯先まで詰め、左上を揃える。横長なら 90° 回して縦長にする（スマホの縦画面を広く使うため）。
+ * 裏返し（x と y の入れ替え）だと回る向きが逆になるので、回転にする。
+ */
+function fit(p: Puzzle): Puzzle {
+  const xs0 = p.pegs.map((q) => q.x)
+  const ys0 = p.pegs.map((q) => q.y)
+  if (Math.max(...xs0) - Math.min(...xs0) > Math.max(...ys0) - Math.min(...ys0)) {
+    const turn = <T extends { x: number; y: number }>(q: T): T => ({ ...q, x: -q.y, y: q.x })
+    p = { ...p, pegs: p.pegs.map(turn), obstacles: p.obstacles?.map(turn) }
+  }
+  const m = Math.max(...p.teeth) / 2 + 2
+  const xs = p.pegs.map((q) => q.x)
+  const ys = p.pegs.map((q) => q.y)
+  const dx = m - Math.min(...xs)
+  const dy = m - Math.min(...ys)
+  const width = Math.max(...xs) + dx + m
+  const height = Math.max(...ys) + dy + m
+  const obstacles = p.obstacles
+    ?.map((o) => ({ ...o, x: o.x + dx, y: o.y + dy }))
+    .filter((o) => o.x - o.r >= 0 && o.y - o.r >= 0 && o.x + o.r <= width && o.y + o.r <= height)
+  return {
+    ...p,
+    width,
+    height,
+    pegs: p.pegs.map((q) => ({ ...q, x: q.x + dx, y: q.y + dy })),
+    ...(obstacles?.length ? { obstacles } : {}),
+  }
 }
 
 const found: { p: Puzzle; min: number; sols: number; nodes: number }[] = []
@@ -105,6 +149,11 @@ for (let t = 0; t < trials; t++) {
   if (start.issues.length || start.solved) continue
   const r = solve(p, { maxGears, limit: maxSolutions + 1 })
   if (r.min === null || r.min < minGears || r.solutions.length > maxSolutions) continue
+  if (p.obstacles) {
+    // 障害物が効いている（なければもっと少ない枚数か、別の解がある）ものだけ残す
+    const free = solve({ ...p, obstacles: undefined }, { maxGears, limit: maxSolutions + 2 })
+    if (free.min === r.min && free.solutions.length === r.solutions.length) continue
+  }
   found.push({ p, min: r.min, sols: r.solutions.length, nodes: r.nodes })
 }
 
@@ -112,5 +161,5 @@ found.sort((a, b) => b.min - a.min || a.sols - b.sols || b.nodes - a.nodes)
 console.log(`${found.length} 件`)
 for (const f of found.slice(0, 3)) {
   console.log(`\n最少 ${f.min} 枚  解 ${f.sols}  盤面 ${f.nodes}`)
-  console.log(JSON.stringify({ width, height, pegs: f.p.pegs, given: f.p.given, outputs: f.p.outputs, best: f.min }))
+  console.log(JSON.stringify({ width: f.p.width, height: f.p.height, pegs: f.p.pegs, given: f.p.given, outputs: f.p.outputs, obstacles: f.p.obstacles, best: f.min }))
 }

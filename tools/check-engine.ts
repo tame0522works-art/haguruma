@@ -1,7 +1,9 @@
 // 手で答えの分かる例でエンジンを確かめる。
-import { format } from '../src/engine/rational.ts'
+import { initialAngles } from '../src/engine/phase.ts'
+import { format, toNumber } from '../src/engine/rational.ts'
 import { solve } from '../src/engine/solve.ts'
-import { evaluate, type Issue } from '../src/engine/train.ts'
+import { evaluate, keyOf, type Issue } from '../src/engine/train.ts'
+import { puzzles } from '../src/puzzles/index.ts'
 import { ALL_TEETH, type Peg, type Placement, type Puzzle, type Teeth } from '../src/puzzles/types.ts'
 
 let failures = 0
@@ -130,6 +132,37 @@ const kinds = (issues: Issue[]) => issues.map((i) => i.kind).join(',')
   check('1/9 は 24枚 + 8枚（同軸）の 2 枚で解ける', r.min === 2, `min=${r.min} 解=${r.solutions.length} 盤面=${r.nodes}`)
   const ev = evaluate(p, r.solutions[0] ?? [])
   check('解は evaluate でも solved', ev.solved)
+}
+
+{
+  // 見た目の角度: 全問の解で、噛み合う2枚の歯が相手の谷の真ん中に来ているか。回したあと（t = 0.37, 2.9）も確かめる。
+  let worst = 0
+  let meshes = 0
+  for (const p of puzzles) {
+    const sol = solve(p).solutions[0]
+    const all = [...p.given, ...sol]
+    const ev = evaluate(p, sol)
+    const base = initialAngles(p, all, ev.meshes)
+    const byKey = new Map(all.map((x) => [keyOf(x), x]))
+    const pegs = new Map(p.pegs.map((x) => [x.id, x]))
+    for (const t of [0, 0.37, 2.9]) {
+      const angle = (k: string) => base.get(k)! + toNumber(ev.omega.get(k.split(':')[0])!) * t
+      for (const m of ev.meshes) {
+        const a = byKey.get(m.a)!
+        const b = byKey.get(m.b)!
+        const pa = pegs.get(a.peg)!
+        const pb = pegs.get(b.peg)!
+        const phi = Math.atan2(pb.y - pa.y, pb.x - pa.x)
+        const nA = ((phi - angle(m.a)) * a.teeth) / (2 * Math.PI)
+        const nB = ((phi + Math.PI - angle(m.b)) * b.teeth) / (2 * Math.PI)
+        // nA + nB が 0.5 の整数ずれなら、歯と谷が向き合っている
+        const off = Math.abs(((((nA + nB - 0.5) % 1) + 1.5) % 1) - 0.5)
+        worst = Math.max(worst, off)
+        meshes++
+      }
+    }
+  }
+  check('全問の解で歯が相手の谷に向き合う', worst < 1e-9, `${meshes} 組、最大のずれ ${worst.toExponential(1)} 歯`)
 }
 
 console.log(failures ? `\n${failures} 件の NG` : '\nすべて ok')
