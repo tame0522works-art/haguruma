@@ -13,6 +13,9 @@ for (const [i, p] of puzzles.entries()) {
   if (new Set(ids).size !== ids.length) problems.push('軸の id が重なっている')
   if (new Set(puzzles.map((x) => x.id)).size !== puzzles.length) problems.push('問題の id が重なっている')
   if (!p.given.some((g) => g.peg === p.input)) problems.push('入力軸に歯車がない')
+  // 軸の当たり（半径 3.4）が重なると、指で押したとき隣の軸に当たる
+  for (const [j, a] of p.pegs.entries())
+    for (const b of p.pegs.slice(j + 1)) if ((a.x - b.x) ** 2 + (a.y - b.y) ** 2 < 25) problems.push(`軸 ${a.id} と ${b.id} が近すぎる`)
 
   const start = evaluate(p, [])
   if (start.issues.length) problems.push(`最初の盤面に問題: ${start.issues.map((x) => x.kind).join(',')}`)

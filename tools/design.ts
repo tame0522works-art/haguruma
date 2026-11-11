@@ -44,6 +44,12 @@ for (const d of distances) {
 
 const chainLength = Number(arg("chain", "3"))
 const obstacleCount = Number(arg("obstacles", "0"))
+/** 2つめの出力 P までの歯車の数。-1 なら出力は1つ。 */
+const branchLength = Number(arg("branch", "-1"))
+const outTeeth2 = Number(arg("out2", "16")) as Teeth
+/** 在庫。例 --stock=8:1,12:2、または --stock=auto */
+const stockArg = arg("stock", "")
+const fixedStock = stockArg && stockArg !== "auto" ? (Object.fromEntries(stockArg.split(",").map((kv) => kv.split(":").map(Number))) as Partial<Record<Teeth, number>>) : undefined
 
 /**
  * 解ける問題を作るため、まず入力から歯車を1枚ずつ伸ばした「想定の答え」を作り、その先に出力の軸を置く。
@@ -61,30 +67,41 @@ function attempt(): Puzzle | null {
   const ok = (p: Placement[]) => evaluate(draft(), p).issues.length === 0
   const fits = (p: Peg) => p.x >= 5 && p.y >= 5 && p.x <= width - 5 && p.y <= height - 5 && !pegs.some((q) => (q.x - p.x) ** 2 + (q.y - p.y) ** 2 < 25)
 
-  const grow = (t: Teeth, last: boolean): boolean => {
-    const cur = chain[chain.length - 1]
+  // tip = 伸ばす先の歯車（chain の添字）。枝分かれのときは途中の歯車から伸ばす
+  let tip = 0
+  const grow = (t: Teeth, outId: string | null): boolean => {
+    const cur = chain[tip]
     const at = pegs.find((p) => p.id === cur.peg)!
     for (let k = 0; k < 40; k++) {
-      if (!last && layers === 2 && random() < 0.3 && !chain.some((c) => c.peg === cur.peg && c.layer !== cur.layer)) {
+      if (!outId && layers === 2 && random() < 0.3 && !chain.some((c) => c.peg === cur.peg && c.layer !== cur.layer)) {
         const g: Placement = { peg: cur.peg, layer: (1 - cur.layer) as Layer, teeth: t }
-        if (ok([...chain, g])) return chain.push(g), true
+        if (ok([...chain, g])) return (tip = chain.push(g) - 1), true
         continue
       }
       const [vx, vy] = pick(vectors.get((cur.teeth + t) / 2)!)
       // 右へ進むほうを選びやすくして、盤の中で詰まりにくくする
       if (vx < 0 && random() < 0.8) continue
-      const p = { id: last ? "O" : nextName(), x: at.x + vx, y: at.y + vy }
+      const p = { id: outId ?? nextName(), x: at.x + vx, y: at.y + vy }
       if (!fits(p)) continue
       pegs.push(p)
       const g: Placement = { peg: p.id, layer: cur.layer, teeth: t }
-      if (ok([...chain, g])) return chain.push(g), true
+      if (ok([...chain, g])) return (tip = chain.push(g) - 1), true
       pegs.pop()
     }
     return false
   }
-  for (let i = 0; i < chainLength; i++) if (!grow(pick(teeth), false)) return null
-  if (!grow(outTeeth, true)) return null
+  for (let i = 0; i < chainLength; i++) if (!grow(pick(teeth), null)) return null
+  if (!grow(outTeeth, 'O')) return null
   const out = chain[chain.length - 1]
+  const outs: Placement[] = [out]
+  if (branchLength >= 0) {
+    // 2つめの出力 P: 入力と O の間の歯車から枝分かれさせる
+    if (chain.length < 3) return null
+    tip = 1 + Math.floor(random() * (chain.length - 2))
+    for (let i = 0; i < branchLength; i++) if (!grow(pick(teeth), null)) return null
+    if (!grow(outTeeth2, 'P')) return null
+    outs.push(chain[chain.length - 1])
+  }
 
   let guard = 0
   while (pegs.length < pegCount + 2 && guard++ < 500) {
@@ -93,8 +110,14 @@ function attempt(): Puzzle | null {
     const p = { id: nextName(), x: from.x + vx, y: from.y + vy }
     if (fits(p)) pegs.push(p)
   }
-  const ratio = evaluate(draft(), chain).omega.get("O")!
+  const stock = fixedStock
+  const omega = evaluate(draft(), chain).omega
+  const ratio = omega.get("O")!
   if (rn !== 0 && (ratio.n * rd !== rn * ratio.d)) return null
+  const outputs = outs.map((o) => {
+    const w = omega.get(o.peg)!
+    return { peg: o.peg, ratio: [w.n, w.d] as [number, number] }
+  })
 
   // 障害物は想定の答えに当たらない所に置く（軸の上にも置かない）
   const obstacles: Obstacle[] = []
@@ -108,7 +131,7 @@ function attempt(): Puzzle | null {
     if (evaluate(draft({ obstacles: [...obstacles, o] }), chain).issues.length) continue
     obstacles.push(o)
   }
-  return fit(draft({ given: [chain[0], out], outputs: [{ peg: "O", ratio: [ratio.n, ratio.d] }], ...(obstacles.length ? { obstacles } : {}) }))
+  return fit(draft({ given: [chain[0], ...outs], outputs, ...(obstacles.length ? { obstacles } : {}), ...(stock ? { stock } : {}) }))
 }
 
 /**
@@ -147,11 +170,31 @@ for (let t = 0; t < trials; t++) {
   if (!p) continue
   const start = evaluate(p, [])
   if (start.issues.length || start.solved) continue
-  const r = solve(p, { maxGears, limit: maxSolutions + 1 })
+  let r = solve(p, { maxGears, limit: stockArg === "auto" ? 30 : maxSolutions + 1 })
+  if (stockArg === "auto" && r.min !== null) {
+    // 在庫なしで解が複数ある配置に、解を絞るか枚数を増やす在庫を探す（1種、1〜2枚。0枚はその種類を置けないのと同じなので使わない）
+    let best: { stock: Partial<Record<Teeth, number>>; r: typeof r } | null = null
+    for (const t of teeth)
+      for (let n = 1; n <= 2; n++) {
+        const q = { ...p, stock: { [t]: n } }
+        const r2 = solve(q, { maxGears, limit: maxSolutions + 1 })
+        if (r2.min === null || r2.solutions.length > maxSolutions) continue
+        if (r2.min === r.min && r2.solutions.length >= r.solutions.length) continue
+        if (!best || r2.min > best.r.min! || (r2.min === best.r.min && r2.solutions.length < best.r.solutions.length)) best = { stock: q.stock, r: r2 }
+      }
+    if (!best) continue
+    p.stock = best.stock
+    r = best.r
+  }
   if (r.min === null || r.min < minGears || r.solutions.length > maxSolutions) continue
   if (p.obstacles) {
     // 障害物が効いている（なければもっと少ない枚数か、別の解がある）ものだけ残す
     const free = solve({ ...p, obstacles: undefined }, { maxGears, limit: maxSolutions + 2 })
+    if (free.min === r.min && free.solutions.length === r.solutions.length) continue
+  }
+  if (p.stock && stockArg !== "auto") {
+    // 在庫が効いているものだけ残す。想定の答えが在庫を超えることもあるので、解けることは上の solve で見ている
+    const free = solve({ ...p, stock: undefined }, { maxGears, limit: maxSolutions + 2 })
     if (free.min === r.min && free.solutions.length === r.solutions.length) continue
   }
   found.push({ p, min: r.min, sols: r.solutions.length, nodes: r.nodes })
@@ -161,5 +204,5 @@ found.sort((a, b) => b.min - a.min || a.sols - b.sols || b.nodes - a.nodes)
 console.log(`${found.length} 件`)
 for (const f of found.slice(0, 3)) {
   console.log(`\n最少 ${f.min} 枚  解 ${f.sols}  盤面 ${f.nodes}`)
-  console.log(JSON.stringify({ width: f.p.width, height: f.p.height, pegs: f.p.pegs, given: f.p.given, outputs: f.p.outputs, obstacles: f.p.obstacles, best: f.min }))
+  console.log(JSON.stringify({ width: f.p.width, height: f.p.height, pegs: f.p.pegs, given: f.p.given, outputs: f.p.outputs, obstacles: f.p.obstacles, stock: f.p.stock, best: f.min }))
 }

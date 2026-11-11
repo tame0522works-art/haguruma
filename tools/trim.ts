@@ -42,7 +42,7 @@ for (const p of puzzles) {
   out.push(same ? next : p)
 }
 
-const order = ['id', 'title', 'note', 'width', 'height', 'pegs', 'layers', 'teeth', 'given', 'input', 'outputs', 'obstacles', 'best'] as const
+const order = ['id', 'title', 'note', 'width', 'height', 'pegs', 'layers', 'teeth', 'given', 'input', 'outputs', 'obstacles', 'stock', 'best'] as const
 const lit = (v: unknown) =>
   JSON.stringify(v)
     .replace(/"(\w+)":/g, '$1: ')

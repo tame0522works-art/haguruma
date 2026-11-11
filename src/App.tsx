@@ -2,10 +2,11 @@ import { useMemo, useState } from 'react'
 import { rat, type Rational } from './engine/rational.ts'
 import { stars as starsOf } from './engine/score.ts'
 import { evaluate, type Issue } from './engine/train.ts'
+import { nextHint, type Hint } from './puzzles/hint.ts'
 import { puzzles } from './puzzles/index.ts'
 import type { Layer, Placement, Puzzle, Teeth } from './puzzles/types.ts'
 import { loadProgress, saveStars, type Progress } from './storage.ts'
-import { Board } from './ui/Board.tsx'
+import { Board, roleOf } from './ui/Board.tsx'
 import { gearPath } from './ui/gearPath.ts'
 
 export default function App() {
@@ -97,6 +98,7 @@ function Play({ index, puzzle, bestBefore: bestAtStart, onSolved, onBack, onNext
   const [selected, setSelected] = useState<string | null>(null)
   const [layer, setLayer] = useState<Layer>(0)
   const [dismissed, setDismissed] = useState(false)
+  const [hint, setHint] = useState<Hint | null>(null)
   const gears = history[history.length - 1]
   const ev = useMemo(() => evaluate(puzzle, gears), [puzzle, gears])
   const solved = ev.solved
@@ -104,6 +106,7 @@ function Play({ index, puzzle, bestBefore: bestAtStart, onSolved, onBack, onNext
 
   const commit = (next: Placement[]) => {
     setHistory((h) => [...h, next])
+    setHint(null)
     const r = evaluate(puzzle, next)
     if (r.solved) {
       onSolved(starsOf(next.length, puzzle.best))
@@ -127,19 +130,18 @@ function Play({ index, puzzle, bestBefore: bestAtStart, onSolved, onBack, onNext
       return
     }
     setSelected(peg)
-    // 下段が最初から埋まっている軸（入力・出力）は上段を選んでおく
+    // ヒントの軸ならヒントの段を、下段が最初から埋まっている軸（入力・出力）なら上段を選んでおく
     const lowerFixed = puzzle.given.some((g) => g.peg === peg && g.layer === 0)
-    setLayer(puzzle.layers === 2 && lowerFixed ? 1 : 0)
+    setLayer(hint?.peg === peg ? hint.layer : puzzle.layers === 2 && lowerFixed ? 1 : 0)
   }
 
-  const goal = puzzle.outputs.map((o) => describeRatio(rat(o.ratio[0], o.ratio[1]))).join('、')
   const kinds = [...new Set(ev.issues.map((i) => i.kind))]
   const missing = ev.outputs.find((o) => !o.ok)
   let status: string
   if (solved) status = '目標どおりに回った。'
   else if (kinds.length) status = kinds.map((k) => ISSUE_TEXT[k]).join(' ')
-  else if (missing && !ev.omega.has(missing.peg)) status = '出力の軸（金の輪）まで回転が届いていない。'
-  else if (missing?.omega) status = `出力の軸はいま${describeRatio(missing.omega)}で回っている。`
+  else if (missing && !ev.omega.has(missing.peg)) status = `${roleOf(puzzle, missing.peg)}（金の輪）まで回転が届いていない。`
+  else if (missing?.omega) status = `${roleOf(puzzle, missing.peg)}はいま${describeRatio(missing.omega)}で回っている。`
   else status = ''
 
   return (
@@ -157,17 +159,29 @@ function Play({ index, puzzle, bestBefore: bestAtStart, onSolved, onBack, onNext
       </header>
 
       <p className="goal">
-        目標: 出力の軸を<b>{goal}</b>で回す
+        目標:{' '}
+        {puzzle.outputs.map((o, i) => (
+          <span key={o.peg}>
+            {i > 0 && '、'}
+            {roleOf(puzzle, o.peg).replace('の軸', '')}を<b>{describeRatio(rat(o.ratio[0], o.ratio[1]))}</b>
+          </span>
+        ))}
+        で回す
       </p>
       {puzzle.note && <p className="rule">{puzzle.note}</p>}
 
       <div className="stage">
-        <Board puzzle={puzzle} gears={gears} ev={ev} selected={selected} onSelect={select} />
+        <Board puzzle={puzzle} gears={gears} ev={ev} selected={selected} hinted={hint?.peg ?? null} onSelect={select} />
       </div>
 
       <p className={`status${kinds.length ? ' bad' : ''}`} aria-live="polite">
         {status}
       </p>
+      {hint && !solved && (
+        <p className="hint-text" aria-live="polite">
+          ヒント: {hintText(puzzle, hint)}
+        </p>
+      )}
 
       {selected && !solved ? (
         <Picker puzzle={puzzle} gears={gears} peg={selected} layer={layer} onLayer={setLayer} onChoose={choose} onClose={() => setSelected(null)} />
@@ -192,15 +206,38 @@ function Play({ index, puzzle, bestBefore: bestAtStart, onSolved, onBack, onNext
       )}
 
       <div className="sub">
-        <button type="button" className="ghost" onClick={() => setHistory((h) => h.slice(0, -1))} disabled={history.length < 2 || solved}>
+        <button
+          type="button"
+          className="ghost"
+          onClick={() => {
+            setHistory((h) => h.slice(0, -1))
+            setHint(null)
+          }}
+          disabled={history.length < 2 || solved}
+        >
           1手戻す
         </button>
+        {!solved && (
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => {
+              const h = nextHint(puzzle, gears)
+              setHint(h)
+              // 選ぶ欄がその軸で開いていれば、段もヒントに合わせる
+              if (h && h.peg === selected) setLayer(h.layer)
+            }}
+          >
+            ヒント
+          </button>
+        )}
         <button
           type="button"
           className="ghost"
           onClick={() => {
             setHistory((h) => [h[0]])
             setSelected(null)
+            setHint(null)
           }}
           disabled={history.length < 2}
         >
@@ -268,7 +305,7 @@ function Picker({ puzzle, gears, peg, layer, onLayer, onChoose, onClose }: Picke
     if (limit === undefined) return null
     return limit - gears.filter((g) => g.teeth === t && !(g.peg === peg && g.layer === layer)).length
   }
-  const role = peg === puzzle.input ? '入力の軸' : puzzle.outputs.some((o) => o.peg === peg) ? '出力の軸' : '軸'
+  const role = roleOf(puzzle, peg)
 
   return (
     <section className="picker" aria-label="置く歯車を選ぶ">
@@ -320,4 +357,11 @@ function Picker({ puzzle, gears, peg, layer, onLayer, onChoose, onClose }: Picke
       )}
     </section>
   )
+}
+
+function hintText(puzzle: Puzzle, h: Hint): string {
+  const where = `光っている${roleOf(puzzle, h.peg)}${puzzle.layers === 2 ? (h.layer ? 'の上段' : 'の下段') : ''}`
+  if (h.teeth === null) return `${where}の歯車を外す（なくても解ける）`
+  if (h.fix) return `${where}の歯車を ${h.teeth}枚歯 に替える`
+  return `${where}に ${h.teeth}枚歯 を置く`
 }

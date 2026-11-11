@@ -129,6 +129,11 @@ export function Board({ puzzle, gears, ev, selected, hinted = null, onSelect }: 
         return (
           <g key={p.id} transform={`translate(${p.x} ${p.y})`}>
             {isOut && <circle className="target" r={2.3} />}
+            {isOut && puzzle.outputs.length > 1 && (
+              <text className="out-num" x={2.4} y={-2.4}>
+                {puzzle.outputs.findIndex((o) => o.peg === p.id) + 1}
+              </text>
+            )}
             {p.id === hinted && <circle className="hint-ring" r={3.2} />}
             {p.id === selected && <circle className="selected" r={2.8} />}
             <circle className={`peg${occupied.has(p.id) ? ' used' : ''}${isIn ? ' input' : ''}${badPegs.has(p.id) ? ' bad' : ''}`} r={isIn ? 1.3 : 1} />
@@ -163,8 +168,15 @@ const ARROW = (() => {
   return `M${p(a0)} A${r} ${r} 0 1 1 ${p(a1)} M${p(a1 + 0.35, r)} L${p(a1, r + 0.9)} M${p(a1 + 0.35, r)} L${p(a1, r - 0.9)}`
 })()
 
+export function roleOf(puzzle: Puzzle, peg: string): string {
+  if (peg === puzzle.input) return '入力の軸'
+  const i = puzzle.outputs.findIndex((o) => o.peg === peg)
+  if (i < 0) return '軸'
+  return puzzle.outputs.length > 1 ? `出力${i + 1}の軸` : '出力の軸'
+}
+
 function pegLabel(puzzle: Puzzle, peg: string, all: readonly Placement[]): string {
-  const role = peg === puzzle.input ? '入力の軸' : puzzle.outputs.some((o) => o.peg === peg) ? '出力の軸' : '軸'
+  const role = roleOf(puzzle, peg)
   const on = all
     .filter((g) => g.peg === peg)
     .sort((a, b) => a.layer - b.layer)
