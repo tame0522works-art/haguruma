@@ -270,7 +270,7 @@ const scenarios: Scenario[] = [
     },
   },
   {
-    name: '動きを減らす設定: 回さずに向きの矢印を出す',
+    name: '動きを減らす設定: 回さずに向きの矢印を出し、「回して見る」で回す（選んだことは残る）',
     setup: `const mm = window.matchMedia.bind(window); window.matchMedia = (q) => q.includes('reduced-motion') ? { matches: true, media: q, addEventListener() {}, removeEventListener() {} } : mm(q);`,
     async run(ui) {
       const p = puzzles[6]
@@ -282,6 +282,18 @@ const scenarios: Scenario[] = [
       await sleep(300)
       const b = await ui.page.run<string[]>(`return [...document.querySelectorAll('.gear .shake > g')].map(g => g.getAttribute('transform'))`)
       assert.deepEqual(a, b, '動きを減らす設定なのに回っている')
+      await ui.press('回して見る')
+      assert.equal(await ui.count('.spin-arrow'), 0)
+      const c = await ui.page.run<string[]>(`return [...document.querySelectorAll('.gear .shake > g')].map(g => g.getAttribute('transform'))`)
+      await sleep(300)
+      const d = await ui.page.run<string[]>(`return [...document.querySelectorAll('.gear .shake > g')].map(g => g.getAttribute('transform'))`)
+      assert.notDeepEqual(c, d, '「回して見る」を押しても回らない')
+      // 読み込み直しても回すまま。「矢印に戻す」で元に戻る
+      await ui.open()
+      await ui.press('1問目')
+      assert.match(await ui.text('.motion-note'), /矢印に戻す/)
+      await ui.press('矢印に戻す')
+      assert.match(await ui.text('.motion-note'), /回して見る/)
     },
   },
   {

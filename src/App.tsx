@@ -5,13 +5,16 @@ import { evaluate, type Issue } from './engine/train.ts'
 import { nextHint, type Hint } from './puzzles/hint.ts'
 import { puzzles } from './puzzles/index.ts'
 import type { Layer, Placement, Puzzle, Teeth } from './puzzles/types.ts'
-import { loadProgress, saveStars, type Progress } from './storage.ts'
+import { loadProgress, loadSpin, saveSpin, saveStars, type Progress } from './storage.ts'
 import { Board, roleOf } from './ui/Board.tsx'
 import { gearPath } from './ui/gearPath.ts'
 
 export default function App() {
   const [progress, setProgress] = useState<Progress>(loadProgress)
   const [current, setCurrent] = useState<number | null>(null)
+  // 動きを減らす設定（Windows のアニメーション効果オフなど）では回さずに矢印で示す。本人が選べば回す
+  const [reduced] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+  const [spin, setSpin] = useState(loadSpin)
 
   if (current === null) return <Menu progress={progress} onPick={setCurrent} />
   const puzzle = puzzles[current]
@@ -24,6 +27,12 @@ export default function App() {
       onSolved={(s) => setProgress((p) => saveStars(p, puzzle.id, s))}
       onBack={() => setCurrent(null)}
       onNext={current + 1 < puzzles.length ? () => setCurrent(current + 1) : null}
+      reduced={reduced}
+      spin={spin}
+      onSpin={(s) => {
+        setSpin(s)
+        saveSpin(s)
+      }}
     />
   )
 }
@@ -89,9 +98,12 @@ interface PlayProps {
   onSolved: (stars: 1 | 2 | 3) => void
   onBack: () => void
   onNext: (() => void) | null
+  reduced: boolean
+  spin: boolean
+  onSpin: (spin: boolean) => void
 }
 
-function Play({ index, puzzle, bestBefore: bestAtStart, onSolved, onBack, onNext }: PlayProps) {
+function Play({ index, puzzle, bestBefore: bestAtStart, onSolved, onBack, onNext, reduced, spin, onSpin }: PlayProps) {
   // 解いた直後に記録が書き換わるので、開いた時点の値を持っておく
   const [bestBefore] = useState(bestAtStart)
   const [history, setHistory] = useState<Placement[][]>([[]])
@@ -171,9 +183,17 @@ function Play({ index, puzzle, bestBefore: bestAtStart, onSolved, onBack, onNext
       {puzzle.note && <p className="rule">{puzzle.note}</p>}
 
       <div className="stage">
-        <Board puzzle={puzzle} gears={gears} ev={ev} selected={selected} hinted={hint?.peg ?? null} onSelect={select} />
+        <Board puzzle={puzzle} gears={gears} ev={ev} selected={selected} hinted={hint?.peg ?? null} still={reduced && !spin} onSelect={select} />
       </div>
 
+      {reduced && (
+        <p className="motion-note">
+          {spin ? '歯車を回して見せています。' : '端末の「動きを減らす」設定に合わせて、回さずに矢印で向きを示しています。'}
+          <button type="button" className="ghost small" onClick={() => onSpin(!spin)}>
+            {spin ? '矢印に戻す' : '回して見る'}
+          </button>
+        </p>
+      )}
       <p className={`status${kinds.length ? ' bad' : ''}`} aria-live="polite">
         {status}
       </p>

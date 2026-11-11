@@ -14,16 +14,17 @@ interface Props {
   ev: Evaluation
   selected: string | null
   hinted?: string | null
+  /** 回さずに向きの矢印で示すか（動きを減らす設定で、本人が「回して見る」を選んでいないとき）。 */
+  still: boolean
   onSelect: (peg: string) => void
 }
 
-export function Board({ puzzle, gears, ev, selected, hinted = null, onSelect }: Props) {
+export function Board({ puzzle, gears, ev, selected, hinted = null, still: reduced, onSelect }: Props) {
   const fixed = useMemo(() => new Set(puzzle.given.map(keyOf)), [puzzle])
   const all = useMemo(() => [...puzzle.given, ...gears], [puzzle, gears])
   const angles = useMemo(() => initialAngles(puzzle, all, ev.meshes), [puzzle, all, ev.meshes])
   const pegs = useMemo(() => new Map(puzzle.pegs.map((p) => [p.id, p])), [puzzle])
   const refs = useRef(new Map<string, SVGGElement>())
-  const reduced = useMemo(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches, [])
 
   // 問題のある歯車・軸・障害物
   const { badGears, badPegs, badObstacles } = useMemo(() => {
